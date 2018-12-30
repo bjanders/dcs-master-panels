@@ -104,13 +104,18 @@ func parseOutput(line string) ([]SwitchRouting, error) {
 	if scanner.Scan() == false {
 		routing.value = 1
 		routingList = append(routingList, routing)
-		routing2 := routing
-		routing2.trigger.Value = 0
-		routing2.value = 0
-		routingList = append(routingList, routing2)
+		routing.trigger.Value = 0
+		routing.value = 0
+		routingList = append(routingList, routing)
 		return routingList, nil
 	}
-	// FIX: scan value
+
+	// get value to set
+	routing.value, err = strconv.ParseFloat(scanner.Text(), 64)
+	if err != nil {
+		return routingList, errors.New("Unable to parse value to set")
+	}
+
 	return append(routingList, routing), nil
 }
 

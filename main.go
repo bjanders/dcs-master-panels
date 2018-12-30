@@ -8,7 +8,8 @@ import (
 	"net"
 )
 
-const server = "127.0.0.1:8888"
+//const server = "127.0.0.1:8888"
+const server = "192.168.71.153:8888"
 
 const (
 	BTN_UP   = 0
@@ -26,15 +27,9 @@ const (
 	CMD_SUBSCRIBE = 3
 )
 
-
 type Gauge struct {
 	Id  int
 	Val float64
-}
-
-type Message struct {
-	Cmd    int
-	Gauges []Gauge
 }
 
 type Display int
@@ -59,33 +54,40 @@ var multiPanel *fpanels.MultiPanel
 var switchPanel *fpanels.SwitchPanel
 
 type DisplayRouting struct {
-	gaugeId int
+	gaugeId   int
 	gaugeName string
-	cond fpanels.SwitchState
-	panel fpanels.PanelId
-	display fpanels.DisplayId
-	format string
+	cond      fpanels.SwitchState
+	panel     fpanels.PanelId
+	display   fpanels.DisplayId
+	format    string
 }
 
-var displayRouting []DisplayRouting
-
-//func addDisplay()
+var gaugeCount int
 
 type SwitchRouting struct {
-	trigger fpanels.SwitchState
-	cond fpanels.SwitchState
-	mouse int
-	dir int
+	trigger   fpanels.SwitchState
+	cond      fpanels.SwitchState
+	mouse     int
+	dir       int
 	clickable string
+	value     float64
 }
 
-var switchRouting []SwitchRouting
-var aircraft string
+var conf config
 
-// siwthcRouting int ->  mousee, dir, clickable
-// radioswithrouting switchRouting
-// multiswithRouting
-
+func SubscribeDisplay(conn net.Conn, gaugeName string, panel fpanels.PanelId, display fpanels.DisplayId, format string) {
+	routing := DisplayRouting{
+		gaugeCount,
+		gaugeName,
+		fpanels.SwitchState{},
+		panel,
+		display,
+		format,
+	}
+	conf.displayRouting = append(conf.displayRouting, routing)
+	sendSubscribe(conn, routing.gaugeName, routing.gaugeId)
+	gaugeCount++
+}
 
 func decodeGauges(data []interface{}) []Gauge {
 	var gauges []Gauge
@@ -100,12 +102,13 @@ func decodeGauges(data []interface{}) []Gauge {
 
 func updateDisplays(gauges []Gauge) {
 	for _, gauge := range gauges {
-		for _, routing := range displayRouting {
+		for _, routing := range conf.displayRouting {
 			if gauge.Id == routing.gaugeId {
-			switch routing.panel {
-			case fpanels.RADIO:
-				radioPanel.DisplayString(routing.display, fmt.Sprintf(routing.format, gauge.Val))
-			}
+				switch routing.panel {
+				case fpanels.RADIO:
+					s := fmt.Sprintf(routing.format, gauge.Val)
+					radioPanel.DisplayString(routing.display, s)
+				}
 			}
 		}
 	}
@@ -114,9 +117,13 @@ func updateDisplays(gauges []Gauge) {
 func handleSubscribe(data []interface{}) {
 	gauges := decodeGauges(data)
 	log.Printf("%v", gauges)
+	updateDisplays(gauges)
 }
 
 func handleAircraft(data []interface{}) {
+	conf.aircraft = data[0].(string)
+	log.Printf("Got aircraft %s", conf.aircraft)
+	conf.read()
 }
 
 func readJSON(conn net.Conn) {
@@ -139,29 +146,50 @@ func readJSON(conn net.Conn) {
 	}
 }
 
-func sendSubscribe(conn net.Conn, gauge string) {
-	fmt.Fprintf(conn, "[%d,\"%s\"]\n", CMD_SUBSCRIBE, gauge)
+func sendSubscribe(conn net.Conn, gauge string, id int) {
+	fmt.Fprintf(conn, "[%d,\"%s\",{\"id\":%d}]\n", CMD_SUBSCRIBE, gauge, id)
 }
 
 func sendClick(conn net.Conn, pos int, action int, clickable string) {
-	fmt.Fprintf(conn, "[1,%d,%d,\"%s\"]\n", pos, action, clickable)
+	s := fmt.Sprintf("[1,%d,%d,\"%s\"]\n", pos, action, clickable)
+	log.Print(s)
+	fmt.Fprintf(conn, s)
 }
 
-func handleRadio(conn net.Conn, switchState fpanels.SwitchState) {
-	switch switchState.Switch {
-	case fpanels.ENC1_CW_1:
-		sendClick(conn, MOUSE_RIGHT, BTN_DOWN, "CHANNEL_NAVIGATION")
-	case fpanels.ENC1_CCW_1:
-		sendClick(conn, MOUSE_LEFT, BTN_DOWN, "CHANNEL_NAVIGATION")
+func sendClickVal(conn net.Conn, pos int, action int, clickable string, val float64) {
+	fmt.Fprintf(conn, "[1,%d,%d,\"%s\",%.3f]\n", pos, action, clickable, val)
+}
+
+func handleSwitch(conn net.Conn, switchState fpanels.SwitchState) {
+	for _, routing := range conf.switchRouting {
+		if switchState == routing.trigger {
+			if routing.dir == BTN_SET {
+				sendClickVal(conn, routing.mouse, routing.dir, routing.clickable, routing.value)
+			} else {
+				sendClick(conn, routing.mouse, routing.dir, routing.clickable)
+			}
+		}
 	}
 }
 
 func main() {
-	//radio, _ := fpanels.NewRadioPanel()
-	//if err != nil {
-	//	log.Fatal("%v", err)
-	//	return
-	//}
+	var err error
+	var radioSwitches chan fpanels.SwitchState
+	var multiSwitches chan fpanels.SwitchState
+	var switchSwitches chan fpanels.SwitchState
+
+	radioPanel, err = fpanels.NewRadioPanel()
+	if err != nil {
+		log.Print("%v", err)
+	}
+	switchPanel, err = fpanels.NewSwitchPanel()
+	if err != nil {
+		log.Print("%v", err)
+	}
+	multiPanel, err = fpanels.NewMultiPanel()
+	if err != nil {
+		log.Print("%v", err)
+	}
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		log.Fatal("%v", err)
@@ -170,17 +198,26 @@ func main() {
 	log.Print("Connect")
 	go readJSON(conn)
 
-	sendSubscribe(conn, "RSBN_NAV_Chan")
-	//sendSubscribe(conn, "IAS")
-	//sendSubscribe(conn, "Acceleration")
-	//radioSwitches := radio.WatchSwitches()
-	//var switchState fpanels.SwitchState
-	//for {
-	//	select {
-	//	case switchState = <-radioSwitches:
-	//		handleRadio(conn, switchState)
-	//	}
-	//}
+	SubscribeDisplay(conn, "RSBN_NAV_Chan", fpanels.RADIO, fpanels.ACTIVE_1, "%2.f***")
+	SubscribeDisplay(conn, "RSBN_LAND_Chan", fpanels.RADIO, fpanels.ACTIVE_1, "***%2.f")
+	if radioPanel != nil {
+		radioSwitches = radioPanel.WatchSwitches()
+	}
+	if switchPanel != nil {
+		switchSwitches = switchPanel.WatchSwitches()
+	}
+	if multiPanel != nil {
+		switchSwitches = multiPanel.WatchSwitches()
+	}
+	// FIX: preiodically try to connect to unconnected panels
+	var switchState fpanels.SwitchState
 	for {
+		select {
+		case switchState = <-radioSwitches:
+		case switchState = <-switchSwitches:
+		case switchState = <-multiSwitches:
+		}
+		handleSwitch(conn, switchState)
+		log.Printf("%v", switchState)
 	}
 }
