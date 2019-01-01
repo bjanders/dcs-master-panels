@@ -8,9 +8,6 @@ import (
 	"net"
 )
 
-//const server = "127.0.0.1:8888"
-const server = "192.168.71.153:8888"
-
 const (
 	BTN_UP   = 0
 	BTN_DOWN = 1
@@ -32,23 +29,6 @@ type Gauge struct {
 	Val float64
 }
 
-type Display int
-
-const (
-	RADIO_1 Display = iota
-	RADIO_2
-	RADIO_3
-	RADIO_4
-	MULTI_1
-	MULTI_2
-	GEAR_N_RED
-	GEAR_N_GREEN
-	GEAR_L_RED
-	GEAR_L_GREEN
-	GEAR_R_RED
-	GEAR_R_GREEN
-)
-
 var radioPanel *fpanels.RadioPanel
 var multiPanel *fpanels.MultiPanel
 var switchPanel *fpanels.SwitchPanel
@@ -56,37 +36,81 @@ var switchPanel *fpanels.SwitchPanel
 type DisplayRouting struct {
 	gaugeId   int
 	gaugeName string
-	cond      fpanels.SwitchState
+	prec      int
+	freq      int
+	cond      *fpanels.SwitchState
 	panel     fpanels.PanelId
 	display   fpanels.DisplayId
 	format    string
+	leds      byte
 }
 
 var gaugeCount int
 
 type SwitchRouting struct {
 	trigger   fpanels.SwitchState
-	cond      fpanels.SwitchState
+	cond      *fpanels.SwitchState
 	mouse     int
 	dir       int
 	clickable string
-	value     float64
+	value     float64 // if dir == BTN_SET
 }
 
 var conf config
 
-func SubscribeDisplay(conn net.Conn, gaugeName string, panel fpanels.PanelId, display fpanels.DisplayId, format string) {
-	routing := DisplayRouting{
-		gaugeCount,
-		gaugeName,
-		fpanels.SwitchState{},
-		panel,
-		display,
-		format,
+type DCS struct {
+	server   string
+	conn     net.Conn
+	gauges   chan Gauge
+	aircraft chan string
+}
+
+func (dcs *DCS) Connect(server string) (chan string, chan Gauge, error) {
+	var err error
+	dcs.server = server
+	log.Printf("Connecting to %s", server)
+	dcs.conn, err = net.Dial("tcp", server)
+	if err != nil {
+		log.Fatal("%v", err)
+		return dcs.aircraft, dcs.gauges, err
 	}
-	conf.displayRouting = append(conf.displayRouting, routing)
-	sendSubscribe(conn, routing.gaugeName, routing.gaugeId)
-	gaugeCount++
+	log.Print("Connected")
+	dcs.aircraft = make(chan string)
+	dcs.gauges = make(chan Gauge)
+	go dcs.readJSON()
+	return dcs.aircraft, dcs.gauges, nil
+}
+
+func (dcs *DCS) readJSON() {
+	decoder := json.NewDecoder(dcs.conn)
+	var m []interface{}
+	for {
+		err := decoder.Decode(&m)
+		if err != nil {
+			log.Fatalf("!!!!!!!! %v", err)
+			return
+		}
+		cmd := int(m[0].(float64))
+		log.Printf("command %v", cmd)
+		switch cmd {
+		case CMD_AIRCRAFT:
+			aircraft := m[1].(string)
+			log.Printf("Got aircraft %s", aircraft)
+			dcs.aircraft <- aircraft
+		case CMD_SUBSCRIBE:
+			gauges := decodeGauges(m[1:])
+			for _, g := range gauges {
+				dcs.gauges <- g
+			}
+		}
+	}
+}
+
+func subscribeDisplays(dcs *DCS) {
+	for _, routing := range conf.displayRouting {
+		log.Printf("Subscribing to %s", routing.gaugeName)
+		dcs.sendSubscribe(routing.gaugeName, routing.gaugeId)
+	}
 }
 
 func decodeGauges(data []interface{}) []Gauge {
@@ -100,20 +124,67 @@ func decodeGauges(data []interface{}) []Gauge {
 	return gauges
 }
 
+func getPanel(panel fpanels.PanelId) {
+
+}
+
+func updateLEDs(routing DisplayRouting, gauge Gauge) {
+	var panel fpanels.LEDDisplayer
+	switch routing.panel {
+	case fpanels.SWITCH:
+		panel = switchPanel
+	case fpanels.MULTI:
+		panel = multiPanel
+	default:
+		return
+	}
+	if panel != nil {
+		panel.LEDsOnOff(routing.leds, gauge.Val)
+	}
+}
+
+func updateDisplay(routing DisplayRouting, gauge Gauge) {
+	var panel fpanels.StringDisplayer
+
+	switch routing.panel {
+	case fpanels.RADIO:
+		panel = radioPanel
+	case fpanels.MULTI:
+		panel = multiPanel
+	default:
+		return
+	}
+	if panel != nil {
+		s := fmt.Sprintf(routing.format, gauge.Val)
+		panel.DisplayString(routing.display, s)
+	}
+}
+
 func updateDisplays(gauges []Gauge) {
 	for _, gauge := range gauges {
 		for _, routing := range conf.displayRouting {
 			if gauge.Id == routing.gaugeId {
-				switch routing.panel {
-				case fpanels.RADIO:
-					s := fmt.Sprintf(routing.format, gauge.Val)
-					radioPanel.DisplayString(routing.display, s)
+				if routing.panel != fpanels.RADIO && routing.leds != 0 {
+					updateLEDs(routing, gauge)
+				} else {
+					updateDisplay(routing, gauge)
 				}
 			}
 		}
 	}
 }
 
+func routeGauge(gauge Gauge) {
+	for _, routing := range conf.displayRouting {
+		if gauge.Id == routing.gaugeId {
+			if routing.panel != fpanels.RADIO && routing.leds != 0 {
+				updateLEDs(routing, gauge)
+			} else {
+				updateDisplay(routing, gauge)
+			}
+		}
+	}
+}
 func handleSubscribe(data []interface{}) {
 	gauges := decodeGauges(data)
 	log.Printf("%v", gauges)
@@ -121,52 +192,33 @@ func handleSubscribe(data []interface{}) {
 }
 
 func handleAircraft(data []interface{}) {
-	conf.aircraft = data[0].(string)
-	log.Printf("Got aircraft %s", conf.aircraft)
-	conf.read()
+	aircraft := data[0].(string)
+	log.Printf("Got aircraft %s", aircraft)
+	conf.setAircraft(aircraft)
 }
 
-func readJSON(conn net.Conn) {
-	decoder := json.NewDecoder(conn)
-	var m []interface{}
-	for {
-		err := decoder.Decode(&m)
-		if err != nil {
-			log.Fatalf("%v", err)
-			return
-		}
-		cmd := int(m[0].(float64))
-		log.Printf("command %v", cmd)
-		switch cmd {
-		case CMD_AIRCRAFT:
-			handleAircraft(m[1:])
-		case CMD_SUBSCRIBE:
-			handleSubscribe(m[1:])
-		}
-	}
+func (dcs *DCS) sendSubscribe(gauge string, id int) {
+	log.Print("Subscribing to ", gauge)
+	fmt.Fprintf(dcs.conn, "[%d,\"%s\",{\"id\":%d}]\n", CMD_SUBSCRIBE, gauge, id)
 }
 
-func sendSubscribe(conn net.Conn, gauge string, id int) {
-	fmt.Fprintf(conn, "[%d,\"%s\",{\"id\":%d}]\n", CMD_SUBSCRIBE, gauge, id)
-}
-
-func sendClick(conn net.Conn, pos int, action int, clickable string) {
+func (dcs *DCS) sendClick(pos int, action int, clickable string) {
 	s := fmt.Sprintf("[1,%d,%d,\"%s\"]\n", pos, action, clickable)
-	log.Print(s)
-	fmt.Fprintf(conn, s)
+	//log.Print(s)
+	fmt.Fprintf(dcs.conn, s)
 }
 
-func sendClickVal(conn net.Conn, pos int, action int, clickable string, val float64) {
-	fmt.Fprintf(conn, "[1,%d,%d,\"%s\",%.3f]\n", pos, action, clickable, val)
+func (dcs *DCS) sendClickVal(pos int, action int, clickable string, val float64) {
+	fmt.Fprintf(dcs.conn, "[1,%d,%d,\"%s\",%.3f]\n", pos, action, clickable, val)
 }
 
-func handleSwitch(conn net.Conn, switchState fpanels.SwitchState) {
+func handleSwitch(dcs *DCS, switchState fpanels.SwitchState) {
 	for _, routing := range conf.switchRouting {
 		if switchState == routing.trigger {
 			if routing.dir == BTN_SET {
-				sendClickVal(conn, routing.mouse, routing.dir, routing.clickable, routing.value)
+				dcs.sendClickVal(routing.mouse, routing.dir, routing.clickable, routing.value)
 			} else {
-				sendClick(conn, routing.mouse, routing.dir, routing.clickable)
+				dcs.sendClick(routing.mouse, routing.dir, routing.clickable)
 			}
 		}
 	}
@@ -177,6 +229,13 @@ func main() {
 	var radioSwitches chan fpanels.SwitchState
 	var multiSwitches chan fpanels.SwitchState
 	var switchSwitches chan fpanels.SwitchState
+	var gauges chan Gauge
+	var gauge Gauge
+	var aircraftChan chan string
+	var aircraft string
+	var dcs DCS
+
+	conf.getServer()
 
 	radioPanel, err = fpanels.NewRadioPanel()
 	if err != nil {
@@ -190,16 +249,12 @@ func main() {
 	if err != nil {
 		log.Print("%v", err)
 	}
-	conn, err := net.Dial("tcp", server)
+	aircraftChan, gauges, err = dcs.Connect(conf.server)
 	if err != nil {
-		log.Fatal("%v", err)
-		return
+		log.Fatal(err)
 	}
-	log.Print("Connect")
-	go readJSON(conn)
+	log.Print("Connected")
 
-	SubscribeDisplay(conn, "RSBN_NAV_Chan", fpanels.RADIO, fpanels.ACTIVE_1, "%2.f***")
-	SubscribeDisplay(conn, "RSBN_LAND_Chan", fpanels.RADIO, fpanels.ACTIVE_1, "***%2.f")
 	if radioPanel != nil {
 		radioSwitches = radioPanel.WatchSwitches()
 	}
@@ -207,17 +262,28 @@ func main() {
 		switchSwitches = switchPanel.WatchSwitches()
 	}
 	if multiPanel != nil {
-		switchSwitches = multiPanel.WatchSwitches()
+		multiSwitches = multiPanel.WatchSwitches()
 	}
 	// FIX: preiodically try to connect to unconnected panels
+	// FIX: reconnect if network connection is lost
 	var switchState fpanels.SwitchState
 	for {
 		select {
 		case switchState = <-radioSwitches:
+			log.Printf("%v", switchState)
+			handleSwitch(&dcs, switchState)
 		case switchState = <-switchSwitches:
+			log.Printf("%v", switchState)
+			handleSwitch(&dcs, switchState)
 		case switchState = <-multiSwitches:
+			log.Printf("%v", switchState)
+			handleSwitch(&dcs, switchState)
+		case aircraft = <-aircraftChan:
+			log.Print("Reading config")
+			conf.setAircraft(aircraft)
+			subscribeDisplays(&dcs)
+		case gauge = <-gauges:
+			routeGauge(gauge)
 		}
-		handleSwitch(conn, switchState)
-		log.Printf("%v", switchState)
 	}
 }
