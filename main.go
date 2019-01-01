@@ -59,26 +59,32 @@ type SwitchRouting struct {
 var conf config
 
 type DCS struct {
-	server   string
-	conn     net.Conn
-	gauges   chan Gauge
-	aircraft chan string
+	server string
+	conn   net.Conn
+	Ch     DCSChannels
 }
 
-func (dcs *DCS) Connect(server string) (chan string, chan Gauge, error) {
+type DCSChannels struct {
+	gauges     chan Gauge
+	aircraft   chan string
+	disconnect chan bool
+}
+
+func (dcs *DCS) Connect(server string) error {
 	var err error
 	dcs.server = server
 	log.Printf("Connecting to %s", server)
 	dcs.conn, err = net.Dial("tcp", server)
 	if err != nil {
 		log.Fatal("%v", err)
-		return dcs.aircraft, dcs.gauges, err
+		return err
 	}
 	log.Print("Connected")
-	dcs.aircraft = make(chan string)
-	dcs.gauges = make(chan Gauge)
+	dcs.Ch.aircraft = make(chan string)
+	dcs.Ch.gauges = make(chan Gauge)
+	dcs.Ch.disconnect = make(chan bool)
 	go dcs.readJSON()
-	return dcs.aircraft, dcs.gauges, nil
+	return nil
 }
 
 func (dcs *DCS) readJSON() {
@@ -87,7 +93,11 @@ func (dcs *DCS) readJSON() {
 	for {
 		err := decoder.Decode(&m)
 		if err != nil {
-			log.Fatalf("!!!!!!!! %v", err)
+			if err.Error() != "EOF" {
+				log.Fatal(err)
+			}
+			log.Print("Lost connection")
+			dcs.Ch.disconnect <- true
 			return
 		}
 		cmd := int(m[0].(float64))
@@ -96,11 +106,11 @@ func (dcs *DCS) readJSON() {
 		case CMD_AIRCRAFT:
 			aircraft := m[1].(string)
 			log.Printf("Got aircraft %s", aircraft)
-			dcs.aircraft <- aircraft
+			dcs.Ch.aircraft <- aircraft
 		case CMD_SUBSCRIBE:
 			gauges := decodeGauges(m[1:])
 			for _, g := range gauges {
-				dcs.gauges <- g
+				dcs.Ch.gauges <- g
 			}
 		}
 	}
@@ -185,17 +195,7 @@ func routeGauge(gauge Gauge) {
 		}
 	}
 }
-func handleSubscribe(data []interface{}) {
-	gauges := decodeGauges(data)
-	log.Printf("%v", gauges)
-	updateDisplays(gauges)
-}
 
-func handleAircraft(data []interface{}) {
-	aircraft := data[0].(string)
-	log.Printf("Got aircraft %s", aircraft)
-	conf.setAircraft(aircraft)
-}
 
 func (dcs *DCS) sendSubscribe(gauge string, id int) {
 	log.Print("Subscribing to ", gauge)
@@ -229,9 +229,7 @@ func main() {
 	var radioSwitches chan fpanels.SwitchState
 	var multiSwitches chan fpanels.SwitchState
 	var switchSwitches chan fpanels.SwitchState
-	var gauges chan Gauge
 	var gauge Gauge
-	var aircraftChan chan string
 	var aircraft string
 	var dcs DCS
 
@@ -249,11 +247,6 @@ func main() {
 	if err != nil {
 		log.Print("%v", err)
 	}
-	aircraftChan, gauges, err = dcs.Connect(conf.server)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Print("Connected")
 
 	if radioPanel != nil {
 		radioSwitches = radioPanel.WatchSwitches()
@@ -265,25 +258,35 @@ func main() {
 		multiSwitches = multiPanel.WatchSwitches()
 	}
 	// FIX: preiodically try to connect to unconnected panels
-	// FIX: reconnect if network connection is lost
-	var switchState fpanels.SwitchState
-	for {
-		select {
-		case switchState = <-radioSwitches:
-			log.Printf("%v", switchState)
-			handleSwitch(&dcs, switchState)
-		case switchState = <-switchSwitches:
-			log.Printf("%v", switchState)
-			handleSwitch(&dcs, switchState)
-		case switchState = <-multiSwitches:
-			log.Printf("%v", switchState)
-			handleSwitch(&dcs, switchState)
-		case aircraft = <-aircraftChan:
-			log.Print("Reading config")
-			conf.setAircraft(aircraft)
-			subscribeDisplays(&dcs)
-		case gauge = <-gauges:
-			routeGauge(gauge)
+	for  {
+		err = dcs.Connect(conf.server)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Print("Connected")
+
+		var switchState fpanels.SwitchState
+		for disconnected := false; !disconnected; {
+			select {
+			case switchState = <-radioSwitches:
+				log.Printf("%v", switchState)
+				handleSwitch(&dcs, switchState)
+			case switchState = <-switchSwitches:
+				log.Printf("%v", switchState)
+				handleSwitch(&dcs, switchState)
+			case switchState = <-multiSwitches:
+				log.Printf("%v", switchState)
+				handleSwitch(&dcs, switchState)
+			case aircraft = <-dcs.Ch.aircraft:
+				log.Print("Reading config")
+				conf.setAircraft(aircraft)
+				subscribeDisplays(&dcs)
+			case gauge = <-dcs.Ch.gauges:
+				routeGauge(gauge)
+			case disconnected = <-dcs.Ch.disconnect:
+				log.Print("Lost connection")
+				break
+			}
 		}
 	}
 }
