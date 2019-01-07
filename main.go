@@ -1,125 +1,24 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/bjanders/fpanels"
 	"log"
-	"net"
+	"time"
 )
-
-const (
-	BTN_UP   = 0
-	BTN_DOWN = 1
-	BTN_SET  = 2
-)
-
-const (
-	MOUSE_LEFT  = 1
-	MOUSE_RIGHT = 2
-)
-
-const (
-	CMD_AIRCRAFT  = 0
-	CMD_SUBSCRIBE = 3
-)
-
-type Gauge struct {
-	Id  int
-	Val float64
-}
 
 var radioPanel *fpanels.RadioPanel
 var multiPanel *fpanels.MultiPanel
 var switchPanel *fpanels.SwitchPanel
 
-type DisplayRouting struct {
-	gaugeId   int
-	gaugeName string
-	prec      int
-	freq      int
-	cond      *fpanels.SwitchState
-	panel     fpanels.PanelId
-	display   fpanels.DisplayId
-	format    string
-	leds      byte
-}
-
 var gaugeCount int
 
-type SwitchRouting struct {
-	trigger   fpanels.SwitchState
-	cond      *fpanels.SwitchState
-	mouse     int
-	dir       int
-	clickable string
-	value     float64 // if dir == BTN_SET
-}
-
 var conf config
-
-type DCS struct {
-	server string
-	conn   net.Conn
-	Ch     DCSChannels
-}
-
-type DCSChannels struct {
-	gauges     chan Gauge
-	aircraft   chan string
-	disconnect chan bool
-}
-
-func (dcs *DCS) Connect(server string) error {
-	var err error
-	dcs.server = server
-	log.Printf("Connecting to %s", server)
-	dcs.conn, err = net.Dial("tcp", server)
-	if err != nil {
-		log.Fatal("%v", err)
-		return err
-	}
-	log.Print("Connected")
-	dcs.Ch.aircraft = make(chan string)
-	dcs.Ch.gauges = make(chan Gauge)
-	dcs.Ch.disconnect = make(chan bool)
-	go dcs.readJSON()
-	return nil
-}
-
-func (dcs *DCS) readJSON() {
-	decoder := json.NewDecoder(dcs.conn)
-	var m []interface{}
-	for {
-		err := decoder.Decode(&m)
-		if err != nil {
-			if err.Error() != "EOF" {
-				log.Fatal(err)
-			}
-			log.Print("Lost connection")
-			dcs.Ch.disconnect <- true
-			return
-		}
-		cmd := int(m[0].(float64))
-		log.Printf("command %v", cmd)
-		switch cmd {
-		case CMD_AIRCRAFT:
-			aircraft := m[1].(string)
-			log.Printf("Got aircraft %s", aircraft)
-			dcs.Ch.aircraft <- aircraft
-		case CMD_SUBSCRIBE:
-			gauges := decodeGauges(m[1:])
-			for _, g := range gauges {
-				dcs.Ch.gauges <- g
-			}
-		}
-	}
-}
 
 func subscribeDisplays(dcs *DCS) {
 	for _, routing := range conf.displayRouting {
 		log.Printf("Subscribing to %s", routing.gaugeName)
-		dcs.sendSubscribe(routing.gaugeName, routing.gaugeId)
+		dcs.sendSubscribe(routing.gaugeName, routing.gaugeId, routing.prec)
 	}
 }
 
@@ -129,7 +28,7 @@ func decodeGauges(data []interface{}) []Gauge {
 		list := g.([]interface{})
 		gauge := Gauge{int(list[0].(float64)), list[1].(float64)}
 		gauges = append(gauges, gauge)
-		log.Printf("gauge %v", gauge)
+		//log.Printf("gauge %v", gauge)
 	}
 	return gauges
 }
@@ -138,7 +37,7 @@ func getPanel(panel fpanels.PanelId) {
 
 }
 
-func updateLEDs(routing DisplayRouting, gauge Gauge) {
+func updateLEDs(routing *DisplayRouting, gauge Gauge) {
 	var panel fpanels.LEDDisplayer
 	switch routing.panel {
 	case fpanels.SWITCH:
@@ -153,7 +52,7 @@ func updateLEDs(routing DisplayRouting, gauge Gauge) {
 	}
 }
 
-func updateDisplay(routing DisplayRouting, gauge Gauge) {
+func updateDisplay(routing *DisplayRouting, gauge Gauge) {
 	var panel fpanels.StringDisplayer
 
 	switch routing.panel {
@@ -196,30 +95,10 @@ func routeGauge(gauge Gauge) {
 	}
 }
 
-
-func (dcs *DCS) sendSubscribe(gauge string, id int) {
-	log.Print("Subscribing to ", gauge)
-	fmt.Fprintf(dcs.conn, "[%d,\"%s\",{\"id\":%d}]\n", CMD_SUBSCRIBE, gauge, id)
-}
-
-func (dcs *DCS) sendClick(pos int, action int, clickable string) {
-	s := fmt.Sprintf("[1,%d,%d,\"%s\"]\n", pos, action, clickable)
-	//log.Print(s)
-	fmt.Fprintf(dcs.conn, s)
-}
-
-func (dcs *DCS) sendClickVal(pos int, action int, clickable string, val float64) {
-	fmt.Fprintf(dcs.conn, "[1,%d,%d,\"%s\",%.3f]\n", pos, action, clickable, val)
-}
-
-func handleSwitch(dcs *DCS, switchState fpanels.SwitchState) {
-	for _, routing := range conf.switchRouting {
-		if switchState == routing.trigger {
-			if routing.dir == BTN_SET {
-				dcs.sendClickVal(routing.mouse, routing.dir, routing.clickable, routing.value)
-			} else {
-				dcs.sendClick(routing.mouse, routing.dir, routing.clickable)
-			}
+func handleSwitch(dcs *DCS, switchState *fpanels.SwitchState) {
+	for _, devRouting := range conf.devCmdRouting {
+		if *switchState == *devRouting.trigger {
+			dcs.sendDevCmd(&devRouting.cmd)
 		}
 	}
 }
@@ -258,34 +137,36 @@ func main() {
 		multiSwitches = multiPanel.WatchSwitches()
 	}
 	// FIX: preiodically try to connect to unconnected panels
-	for  {
+	for {
+		connected := false
+		log.Printf("Connecting to DCS at %s", conf.server)
 		err = dcs.Connect(conf.server)
 		if err != nil {
-			log.Fatal(err)
+			log.Print(err)
+			log.Print("Waiting 10 seconds")
+			time.Sleep(10 * time.Second)
+		} else {
+			log.Print("Connected")
+			connected = true
 		}
-		log.Print("Connected")
 
 		var switchState fpanels.SwitchState
-		for disconnected := false; !disconnected; {
+		for connected {
 			select {
 			case switchState = <-radioSwitches:
-				log.Printf("%v", switchState)
-				handleSwitch(&dcs, switchState)
+				handleSwitch(&dcs, &switchState)
 			case switchState = <-switchSwitches:
-				log.Printf("%v", switchState)
-				handleSwitch(&dcs, switchState)
+				handleSwitch(&dcs, &switchState)
 			case switchState = <-multiSwitches:
-				log.Printf("%v", switchState)
-				handleSwitch(&dcs, switchState)
+				handleSwitch(&dcs, &switchState)
 			case aircraft = <-dcs.Ch.aircraft:
-				log.Print("Reading config")
+				log.Printf("Controlling aircraft %s", aircraft)
 				conf.setAircraft(aircraft)
 				subscribeDisplays(&dcs)
 			case gauge = <-dcs.Ch.gauges:
 				routeGauge(gauge)
-			case disconnected = <-dcs.Ch.disconnect:
+			case connected = <-dcs.Ch.connected:
 				log.Print("Lost connection")
-				break
 			}
 		}
 	}
