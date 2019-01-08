@@ -4,7 +4,7 @@ import (
 	"github.com/bjanders/fpanels"
 )
 
-type SwitchDevCmdRouting struct {
+type SwitchRouting struct {
 	trigger *fpanels.SwitchState
 	cond    *fpanels.SwitchState
 	cmd     DevCmd
@@ -22,8 +22,8 @@ type DisplayRouting struct {
 	leds      byte
 }
 
-func (routing *SwitchDevCmdRouting) copy() *SwitchDevCmdRouting {
-	var newRouting SwitchDevCmdRouting
+func (routing *SwitchRouting) copy() *SwitchRouting {
+	var newRouting SwitchRouting
 	if routing.trigger != nil {
 		newRouting.trigger = new(fpanels.SwitchState)
 		*newRouting.trigger = *routing.trigger

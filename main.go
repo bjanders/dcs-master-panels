@@ -33,9 +33,16 @@ func decodeGauges(data []interface{}) []Gauge {
 	return gauges
 }
 
-func getPanel(panel fpanels.PanelId) {
-
-}
+//func getPanel(panel fpanels.PanelId) {
+//	switch panel {
+//	case fpanels.RADIO:
+//		return radioPanel
+//	case fpanels.MUTLI:
+//		return multuPanel
+//	case fpanel.SWITCH:
+//		return switchPanel
+//	return nil
+//}
 
 func updateLEDs(routing *DisplayRouting, gauge Gauge) {
 	var panel fpanels.LEDDisplayer
@@ -83,9 +90,24 @@ func updateDisplays(gauges []Gauge) {
 	}
 }
 
+func checkCond(cond *fpanels.SwitchState) bool {
+	if cond == nil {
+		return true
+	}
+	switch cond.Panel {
+	case fpanels.RADIO:
+		return cond.Value == radioPanel.Switches.SwitchState(cond.Switch)
+	case fpanels.MULTI:
+		return cond.Value == multiPanel.Switches.SwitchState(cond.Switch)
+	case fpanels.SWITCH:
+		return cond.Value == switchPanel.Switches.SwitchState(cond.Switch)
+	}
+	return true
+}
+
 func routeGauge(gauge Gauge) {
 	for _, routing := range conf.displayRouting {
-		if gauge.Id == routing.gaugeId {
+		if gauge.Id == routing.gaugeId && checkCond(routing.cond) {
 			if routing.panel != fpanels.RADIO && routing.leds != 0 {
 				updateLEDs(routing, gauge)
 			} else {
@@ -97,7 +119,7 @@ func routeGauge(gauge Gauge) {
 
 func handleSwitch(dcs *DCS, switchState *fpanels.SwitchState) {
 	for _, devRouting := range conf.devCmdRouting {
-		if *switchState == *devRouting.trigger {
+		if *switchState == *devRouting.trigger && checkCond(devRouting.cond) {
 			dcs.sendDevCmd(&devRouting.cmd)
 		}
 	}

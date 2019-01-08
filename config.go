@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"github.com/bjanders/fpanels"
 	"log"
 	"os"
@@ -14,7 +15,7 @@ type config struct {
 	server         string
 	aircraft       string
 	displayRouting []*DisplayRouting
-	devCmdRouting  []*SwitchDevCmdRouting
+	devCmdRouting  []*SwitchRouting
 }
 
 func parseInput(line string) (*DisplayRouting, error) {
@@ -24,12 +25,30 @@ func parseInput(line string) (*DisplayRouting, error) {
 
 	scanner := bufio.NewScanner(strings.NewReader(line))
 	scanner.Split(bufio.ScanWords)
-	// FIX: read optional condition "[panel switch]"
 
-	// Panel
 	if scanner.Scan() == false {
-		return nil, errors.New("Expected panel name")
+		return nil, errors.New("Expected panel name or '['")
 	}
+
+	if scanner.Text() == "[" {
+		if scanner.Scan() == false {
+			return nil, errors.New("Expected panel name")
+		}
+		routing.cond, err = parseSwitchState(scanner)
+		if err != nil {
+			return nil, err
+		}
+		if scanner.Scan() == false {
+			return nil, errors.New("Expected ']'")
+		}
+		if scanner.Text() != "]" {
+			return nil, errors.New("Expected ']'")
+		}
+		if scanner.Scan() == false {
+			return nil, errors.New("Expected panel name")
+		}
+	}
+	// Panel
 	token = scanner.Text()
 	routing.panel, err = fpanels.PanelIdString(token)
 	if err != nil {
@@ -64,7 +83,6 @@ func parseInput(line string) (*DisplayRouting, error) {
 				return nil, errors.New("Expected format string")
 			}
 			routing.format = token[1 : len(token)-1]
-			//log.Print("routing format ", routing.format)
 			if scanner.Scan() == false {
 				return nil, errors.New("Expexted '<-'")
 			}
@@ -96,14 +114,10 @@ func parseSwitchState(scanner *bufio.Scanner) (*fpanels.SwitchState, error) {
 	var switchState fpanels.SwitchState
 	var err error
 
-	// Panel
-	if scanner.Scan() == false {
-		return nil, errors.New("Expected panel name")
-	}
 	token := scanner.Text()
 	switchState.Panel, err = fpanels.PanelIdString(token)
 	if err != nil {
-		return nil, errors.New("Unknown panel name")
+		return nil, errors.New(fmt.Sprintf("Unknown panel name '%s'", token))
 	}
 
 	// Switch
@@ -128,18 +142,45 @@ func parseSwitchState(scanner *bufio.Scanner) (*fpanels.SwitchState, error) {
 	return &switchState, nil
 }
 
-func parseCmdOutput(line string) ([]*SwitchDevCmdRouting, error) {
-	var routing = &SwitchDevCmdRouting{}
-	var routingList []*SwitchDevCmdRouting
+func parseCmdOutput(line string) ([]*SwitchRouting, error) {
+	var routing = &SwitchRouting{}
+	var routingList []*SwitchRouting
 	var err error
+	var token string
 
 	scanner := bufio.NewScanner(strings.NewReader(line))
 	scanner.Split(bufio.ScanWords)
-	// FIX: read optional condition "[panel switch]"
+
+	// Panel
+	if scanner.Scan() == false {
+		return routingList, errors.New("Expected panel name or '['")
+	}
+
+	if scanner.Text() == "[" {
+		if scanner.Scan() == false {
+			return routingList, errors.New("Expected panel name")
+		}
+		routing.cond, err = parseSwitchState(scanner)
+		if err != nil {
+			return routingList, err
+		}
+		if scanner.Scan() == false {
+			return routingList, errors.New("Expected ']', found nothing")
+		}
+		token = scanner.Text()
+		if token != "]" {
+			return routingList, errors.New(fmt.Sprintf("Expected ']', not '%s'", token))
+		}
+		if scanner.Scan() == false {
+			return routingList, errors.New("Expected panel name")
+		}
+	}
+
 	routing.trigger, err = parseSwitchState(scanner)
 	if err != nil {
 		return routingList, err
 	}
+
 	// "->"
 	if scanner.Scan() == false || scanner.Text() != "->" {
 		return routingList, errors.New("Expected '->'")
@@ -215,25 +256,27 @@ func (config *config) setAircraft(aircraft string) {
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
+	lineNumber := 1
 	for scanner.Scan() {
 		line = scanner.Text()
 		switch {
 		case strings.Contains(line, "->"):
 			devRouting, err := parseCmdOutput(line)
 			if err != nil {
-				log.Print(err)
+				log.Printf("Line %d: %s", lineNumber, err)
 			} else {
 				conf.devCmdRouting = append(conf.devCmdRouting, devRouting...)
 			}
 		case strings.Contains(line, "<-"):
 			displayRouting, err := parseInput(line)
 			if err != nil {
-				log.Print(err)
+				log.Printf("Line %d, %s", lineNumber, err)
 			} else {
 				displayRouting.gaugeId = gaugeCount
 				conf.displayRouting = append(conf.displayRouting, displayRouting)
 				gaugeCount++
 			}
 		}
+		lineNumber++
 	}
 }
