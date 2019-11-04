@@ -22,28 +22,6 @@ func subscribeDisplays(dcs *DCS) {
 	}
 }
 
-func decodeGauges(data []interface{}) []Gauge {
-	var gauges []Gauge
-	for _, g := range data {
-		list := g.([]interface{})
-		gauge := Gauge{int(list[0].(float64)), list[1].(float64)}
-		gauges = append(gauges, gauge)
-		//log.Printf("gauge %v", gauge)
-	}
-	return gauges
-}
-
-//func getPanel(panel fpanels.PanelId) {
-//	switch panel {
-//	case fpanels.RADIO:
-//		return radioPanel
-//	case fpanels.MUTLI:
-//		return multuPanel
-//	case fpanel.SWITCH:
-//		return switchPanel
-//	return nil
-//}
-
 func updateLEDs(routing *DisplayRouting, gauge Gauge) {
 	var panel fpanels.LEDDisplayer
 	switch routing.panel {
@@ -106,6 +84,8 @@ func checkCond(cond *fpanels.SwitchState) bool {
 }
 
 func routeGauge(gauge Gauge) {
+	// FIX: Save all gauges so that displays can be updated
+	//      if state changes
 	for _, routing := range conf.displayRouting {
 		if gauge.Id == routing.gaugeId && checkCond(routing.cond) {
 			if routing.panel != fpanels.RADIO && routing.leds != 0 {
@@ -118,6 +98,7 @@ func routeGauge(gauge Gauge) {
 }
 
 func handleSwitch(dcs *DCS, switchState *fpanels.SwitchState) {
+	// FIX: Update displays since the state may have changed
 	for _, devRouting := range conf.devCmdRouting {
 		if *switchState == *devRouting.trigger && checkCond(devRouting.cond) {
 			dcs.sendDevCmd(&devRouting.cmd)

@@ -78,6 +78,17 @@ func (dcs *DCS) readJSON() {
 	}
 }
 
+func decodeGauges(data []interface{}) []Gauge {
+	var gauges []Gauge
+	for _, g := range data {
+		list := g.([]interface{})
+		gauge := Gauge{int(list[0].(float64)), list[1].(float64)}
+		gauges = append(gauges, gauge)
+		//log.Printf("gauge %v", gauge)
+	}
+	return gauges
+}
+
 func quote(str string) string {
 	return fmt.Sprintf("\"%s\"", str)
 }
