@@ -118,7 +118,7 @@ func parseSwitchState(scanner *bufio.Scanner) (*fpanels.SwitchState, error) {
 	token := scanner.Text()
 	switchState.Panel, err = fpanels.PanelIDString(token)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Unknown panel name '%s'", token))
+		return nil, fmt.Errorf("Unknown panel name '%s'", token)
 	}
 
 	// Switch
@@ -170,7 +170,7 @@ func parseCmdOutput(line string) ([]*SwitchRouting, error) {
 		}
 		token = scanner.Text()
 		if token != "]" {
-			return routingList, errors.New(fmt.Sprintf("Expected ']', not '%s'", token))
+			return routingList, fmt.Errorf("Expected ']', not '%s'", token)
 		}
 		if scanner.Scan() == false {
 			return routingList, errors.New("Expected panel name")

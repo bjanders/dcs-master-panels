@@ -95,7 +95,7 @@ func quote(str string) string {
 
 func (dcs *DCS) sendSubscribe(gauge string, id int, prec int) {
 	//log.Print("Subscribing to ", gauge)
-	fmt.Fprintf(dcs.conn, "[%d,%s,%d,{\"p\":%d}]\n", CMD_SUBSCRIBE, quote(gauge), id, prec)
+	fmt.Fprintf(dcs.conn, "[%d,%s,%d,%d]\n", CMD_SUBSCRIBE, quote(gauge), id, prec)
 }
 
 func (dcs *DCS) sendDevCmd(devCmd *DevCmd) {

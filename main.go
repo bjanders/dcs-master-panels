@@ -120,15 +120,15 @@ func main() {
 
 	radioPanel, err = fpanels.NewRadioPanel()
 	if err != nil {
-		log.Print("%v", err)
+		log.Printf("%v", err)
 	}
 	switchPanel, err = fpanels.NewSwitchPanel()
 	if err != nil {
-		log.Print("%v", err)
+		log.Printf("%v", err)
 	}
 	multiPanel, err = fpanels.NewMultiPanel()
 	if err != nil {
-		log.Print("%v", err)
+		log.Printf("%v", err)
 	}
 
 	if radioPanel != nil {
