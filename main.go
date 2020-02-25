@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/bjanders/fpanels"
 	"log"
 	"time"
+
+	"github.com/bjanders/fpanels"
 )
 
 var radioPanel *fpanels.RadioPanel
@@ -74,11 +75,11 @@ func checkCond(cond *fpanels.SwitchState) bool {
 	}
 	switch cond.Panel {
 	case fpanels.RADIO:
-		return cond.Value == radioPanel.Switches.SwitchState(cond.Switch)
+		return cond.On == radioPanel.IsSwitchSet(cond.Switch)
 	case fpanels.MULTI:
-		return cond.Value == multiPanel.Switches.SwitchState(cond.Switch)
+		return cond.On == multiPanel.IsSwitchSet(cond.Switch)
 	case fpanels.SWITCH:
-		return cond.Value == switchPanel.Switches.SwitchState(cond.Switch)
+		return cond.On == switchPanel.IsSwitchSet(cond.Switch)
 	}
 	return true
 }

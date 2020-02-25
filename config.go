@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/bjanders/fpanels"
 	"log"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/bjanders/fpanels"
 )
 
 type config struct {
@@ -135,9 +136,9 @@ func parseSwitchState(scanner *bufio.Scanner) (*fpanels.SwitchState, error) {
 		if err != nil {
 			return nil, errors.New("Unable to parse switchState value")
 		}
-		switchState.Value = uint(val)
+		switchState.On = val == 1
 	} else {
-		switchState.Value = 1
+		switchState.On = true
 	}
 	return &switchState, nil
 }
@@ -201,7 +202,7 @@ func parseCmdOutput(line string) ([]*SwitchRouting, error) {
 		routing.cmd.Val = 1.0
 		routingList = append(routingList, routing)
 		routing = routing.copy()
-		routing.trigger.Value = 0
+		routing.trigger.On = false
 		routing.cmd.Val = 0.0
 		routingList = append(routingList, routing)
 		return routingList, nil
@@ -219,7 +220,7 @@ func parseCmdOutput(line string) ([]*SwitchRouting, error) {
 		return routingList, nil
 	}
 	routing = routing.copy()
-	routing.trigger.Value = 0
+	routing.trigger.On = false
 	routing.cmd.Val, err = strconv.ParseFloat(scanner.Text(), 64)
 	if err != nil {
 		return routingList, errors.New("Unable to parse value to set")
