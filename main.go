@@ -19,7 +19,7 @@ var conf config
 func subscribeDisplays(dcs *DCS) {
 	for _, routing := range conf.displayRouting {
 		log.Printf("Subscribing to %s", routing.gaugeName)
-		dcs.sendSubscribe(routing.gaugeName, routing.gaugeId, routing.prec)
+		dcs.sendSubscribe(routing.gaugeName, routing.gaugeID, routing.prec)
 	}
 }
 
@@ -58,7 +58,7 @@ func updateDisplay(routing *DisplayRouting, gauge Gauge) {
 func updateDisplays(gauges []Gauge) {
 	for _, gauge := range gauges {
 		for _, routing := range conf.displayRouting {
-			if gauge.Id == routing.gaugeId {
+			if gauge.Id == routing.gaugeID {
 				if routing.panel != fpanels.RADIO && routing.leds != 0 {
 					updateLEDs(routing, gauge)
 				} else {
@@ -88,7 +88,7 @@ func routeGauge(gauge Gauge) {
 	// FIX: Save all gauges so that displays can be updated
 	//      if state changes
 	for _, routing := range conf.displayRouting {
-		if gauge.Id == routing.gaugeId && checkCond(routing.cond) {
+		if gauge.Id == routing.gaugeID && checkCond(routing.cond) {
 			if routing.panel != fpanels.RADIO && routing.leds != 0 {
 				updateLEDs(routing, gauge)
 			} else {

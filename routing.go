@@ -11,13 +11,13 @@ type SwitchRouting struct {
 }
 
 type DisplayRouting struct {
-	gaugeId   int
+	gaugeID   int
 	gaugeName string
 	prec      int
 	freq      int
 	cond      *fpanels.SwitchState
-	panel     fpanels.PanelId
-	display   fpanels.DisplayId
+	panel     fpanels.PanelID
+	display   fpanels.DisplayID
 	format    string
 	leds      byte
 }

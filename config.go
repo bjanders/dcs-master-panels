@@ -51,7 +51,7 @@ func parseInput(line string) (*DisplayRouting, error) {
 	}
 	// Panel
 	token = scanner.Text()
-	routing.panel, err = fpanels.PanelIdString(token)
+	routing.panel, err = fpanels.PanelIDString(token)
 	if err != nil {
 		return nil, errors.New("Unknown panel name: " + token)
 	}
@@ -61,7 +61,7 @@ func parseInput(line string) (*DisplayRouting, error) {
 		return nil, errors.New("Expected display or LED name")
 	}
 	token = scanner.Text()
-	routing.display, err = fpanels.DisplayIdString(token)
+	routing.display, err = fpanels.DisplayIDString(token)
 	if err != nil {
 		routing.leds, err = fpanels.LEDString(token)
 		if err != nil {
@@ -116,7 +116,7 @@ func parseSwitchState(scanner *bufio.Scanner) (*fpanels.SwitchState, error) {
 	var err error
 
 	token := scanner.Text()
-	switchState.Panel, err = fpanels.PanelIdString(token)
+	switchState.Panel, err = fpanels.PanelIDString(token)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Unknown panel name '%s'", token))
 	}
@@ -127,7 +127,7 @@ func parseSwitchState(scanner *bufio.Scanner) (*fpanels.SwitchState, error) {
 	}
 	token = scanner.Text()
 	split := strings.Split(token, "=")
-	switchState.Switch, err = fpanels.SwitchIdString(split[0])
+	switchState.Switch, err = fpanels.SwitchIDString(split[0])
 	if err != nil {
 		return nil, errors.New("Unknown switch name")
 	}
@@ -273,7 +273,7 @@ func (config *config) setAircraft(aircraft string) {
 			if err != nil {
 				log.Printf("Line %d, %s", lineNumber, err)
 			} else {
-				displayRouting.gaugeId = gaugeCount
+				displayRouting.gaugeID = gaugeCount
 				conf.displayRouting = append(conf.displayRouting, displayRouting)
 				gaugeCount++
 			}
