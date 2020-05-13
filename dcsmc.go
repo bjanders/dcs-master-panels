@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"strings"
+	"strconv"
 )
 
 const (
@@ -46,7 +49,7 @@ func (dcs *DCS) Connect(server string) error {
 	dcs.Ch.aircraft = make(chan string)
 	dcs.Ch.gauges = make(chan Gauge)
 	dcs.Ch.connected = make(chan bool)
-	go dcs.readJSON()
+	go dcs.readInput()
 	return nil
 }
 
@@ -78,6 +81,28 @@ func (dcs *DCS) readJSON() {
 	}
 }
 
+func (dcs *DCS) readInput() {
+	scanner := bufio.NewScanner(dcs.conn)
+	for scanner.Scan() {
+		line := scanner.Text()
+		msg := strings.Split(line, " ")
+		//log.Printf("command %v", cmd)
+		cmd, _ := strconv.Atoi(msg[0])
+		switch cmd {
+		case CMD_AIRCRAFT:
+			aircraft := msg[1]
+			//log.Printf("Got aircraft %s", aircraft)
+			dcs.Ch.aircraft <- aircraft
+		case CMD_SUBSCRIBE:
+			id, _ := strconv.Atoi(msg[1])
+			val, _ := strconv.ParseFloat(msg[3], 64)
+			log.Printf("Got value %d %f", id, val)
+			dcs.Ch.gauges <- Gauge{id, val}
+		}
+	}
+	dcs.Ch.connected <- false
+}
+
 func decodeGauges(data []interface{}) []Gauge {
 	var gauges []Gauge
 	for _, g := range data {
@@ -95,11 +120,12 @@ func quote(str string) string {
 
 func (dcs *DCS) sendSubscribe(gauge string, id int, prec int) {
 	//log.Print("Subscribing to ", gauge)
-	fmt.Fprintf(dcs.conn, "[%d,%s,%d,%d]\n", CMD_SUBSCRIBE, quote(gauge), id, prec)
+	//fmt.Fprintf(dcs.conn, "[%d,%s,%d,%d]\n", CMD_SUBSCRIBE, quote(gauge), id, prec)
+	fmt.Fprintf(dcs.conn, "%d %s %d %d\n", CMD_SUBSCRIBE, gauge, id, prec)
 }
 
 func (dcs *DCS) sendDevCmd(devCmd *DevCmd) {
-	s := fmt.Sprintf("[%d,%s,%s,%.3f]\n", CMD_DEVCMD, quote(devCmd.Dev), quote(devCmd.Cmd), devCmd.Val)
+	s := fmt.Sprintf("%d %s %s %.3f\n", CMD_DEVCMD, devCmd.Dev, devCmd.Cmd, devCmd.Val)
 	//log.Printf(s)
 	fmt.Fprintf(dcs.conn, s)
 }

@@ -75,10 +75,19 @@ func checkCond(cond *fpanels.SwitchState) bool {
 	}
 	switch cond.Panel {
 	case fpanels.RADIO:
+		if radioPanel == nil {
+			return false
+		}
 		return cond.On == radioPanel.IsSwitchSet(cond.Switch)
 	case fpanels.MULTI:
+		if multiPanel == nil {
+			return false
+		}
 		return cond.On == multiPanel.IsSwitchSet(cond.Switch)
 	case fpanels.SWITCH:
+		if switchPanel == nil {
+			return false
+		}
 		return cond.On == switchPanel.IsSwitchSet(cond.Switch)
 	}
 	return true
@@ -120,26 +129,28 @@ func main() {
 
 	radioPanel, err = fpanels.NewRadioPanel()
 	if err != nil {
+		radioPanel = nil
 		log.Printf("%v", err)
-	}
-	switchPanel, err = fpanels.NewSwitchPanel()
-	if err != nil {
-		log.Printf("%v", err)
-	}
-	multiPanel, err = fpanels.NewMultiPanel()
-	if err != nil {
-		log.Printf("%v", err)
-	}
-
-	if radioPanel != nil {
+	} else {
 		radioSwitches = radioPanel.WatchSwitches()
 	}
-	if switchPanel != nil {
+
+	switchPanel, err = fpanels.NewSwitchPanel()
+	if err != nil {
+		switchPanel = nil
+		log.Printf("%v", err)
+	} else {
 		switchSwitches = switchPanel.WatchSwitches()
 	}
-	if multiPanel != nil {
+
+	multiPanel, err = fpanels.NewMultiPanel()
+	if err != nil {
+		multiPanel = nil
+		log.Printf("%v", err)
+	} else {
 		multiSwitches = multiPanel.WatchSwitches()
 	}
+
 	// FIX: preiodically try to connect to unconnected panels
 	for {
 		connected := false
